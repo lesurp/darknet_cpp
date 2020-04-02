@@ -1,3 +1,4 @@
+#include <opencv2/core/types.hpp>
 #define OPENCV
 #define GPU
 #define CUDNN
@@ -6,7 +7,98 @@
 #include "darknet.h"
 #include <fmt/printf.h>
 #include <opencv2/core.hpp>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/highgui.hpp>
 #include <opencv2/videoio.hpp>
+
+void draw_detections(cv::Mat &f,
+                     detection *dets,
+                     int num,
+                     float thresh,
+                     char **names,
+                     image **alphabet,
+                     int classes)
+{
+    int i, j;
+
+    for (i = 0; i < num; ++i)
+    {
+        char labelstr[4096] = {0};
+        int class_ = -1;
+        for (j = 0; j < classes; ++j)
+        {
+            if (dets[i].prob[j] > thresh)
+            {
+                if (class_ < 0)
+                {
+                    strcat(labelstr, names[j]);
+                    class_ = j;
+                }
+                else
+                {
+                    strcat(labelstr, ", ");
+                    strcat(labelstr, names[j]);
+                }
+                printf("%s: %.0f%%\n", names[j], dets[i].prob[j] * 100);
+            }
+        }
+        if (class_ < 0)
+        {
+            continue;
+        }
+
+        float red = 1.0;
+        float green = 1.0;
+        float blue = 0.0;
+        float rgb[3];
+
+        // width = prob*20+2;
+
+        rgb[0] = red;
+        rgb[1] = green;
+        rgb[2] = blue;
+        box b = dets[i].bbox;
+        // printf("%f %f %f %f\n", b.x, b.y, b.w, b.h);
+
+        int left = (b.x - b.w / 2.) * f.cols;
+        int right = (b.x + b.w / 2.) * f.cols;
+        int top = (b.y - b.h / 2.) * f.rows;
+        int bot = (b.y + b.h / 2.) * f.rows;
+
+        if (left < 0)
+            left = 0;
+        if (right > f.cols - 1)
+            right = f.cols - 1;
+        if (top < 0)
+            top = 0;
+        if (bot > f.rows - 1)
+            bot = f.rows - 1;
+
+        cv::rectangle(f,
+                      cv::Point(left, top),
+                      cv::Point(right, bot),
+                      cv::Scalar(red, green, blue),
+                      1);
+        cv::putText(f,
+                    names[class_],
+                    cv::Point(left, bot),
+                    0,
+                    1.0,
+                    cv::Scalar_(red, green, blue));
+        /*
+        if (dets[i].mask)
+        {
+            image mask = float_to_image(14, 14, 1, dets[i].mask);
+            image resized_mask = resize_image(mask, b.w * f.cols, b.h * f.rows);
+            image tmask = threshold_image(resized_mask, .5);
+            embed_image(tmask, im, left, top);
+            free_image(mask);
+            free_image(resized_mask);
+            free_image(tmask);
+        }
+        */
+    }
+}
 
 static float get_pixel(image m, int x, int y, int c)
 {
@@ -75,16 +167,12 @@ struct Detector
 {
     float detection_threshold() const { return detection_threshold_; }
     char **labels() const { return labels_; }
-    int classes() const { return demo_classes; }
-    float fps() const { return fps_; }
 
     char **labels_;
-    int demo_classes;
 
     network *net;
     image buff;
     image buff_letter;
-    float fps_ = 0;
     float detection_threshold_ = 0;
     float demo_hier = .5;
     int running = 0;
@@ -94,7 +182,6 @@ struct Detector
     float **predictions;
     float *avg;
     int demo_total = 0;
-    double demo_time;
 
     std::pair<detection *, int> detect_in_thread();
     void remember_network(network *net);
@@ -104,17 +191,13 @@ struct Detector
              char *weightfile,
              float thresh,
              char **names,
-             int classes,
              int /* delay */,
-             char *prefix,
              int avg_frames,
              float hier,
-             int fullscreen,
              cv::Mat const &init_f)
     {
         avg_frame = avg_frames;
         labels_ = names;
-        demo_classes = classes;
         detection_threshold_ = thresh;
         demo_hier = hier;
         printf("Demo\n");
@@ -133,23 +216,14 @@ struct Detector
 
         buff = mat_to_image(init_f);
         buff_letter = letterbox_image(buff, net->w, net->h);
-
-        if (!prefix)
-        {
-            make_window((char *)"Demo", 1352, 1013, fullscreen);
-        }
     }
 
     std::pair<detection *, int> run_once(cv::Mat const &image)
     {
-        fps_ = 1. / (what_time_is_it_now() - demo_time);
-        demo_time = what_time_is_it_now();
         free_image(buff);
         buff = mat_to_image(image);
         assert(buff.data != 0);
-        // buff_letter[buff_index] = letterbox_image(buff[buff_index], net->w, net->h);
         letterbox_image_into(buff, net->w, net->h, buff_letter);
-
         return detect_in_thread();
     }
 
@@ -253,10 +327,8 @@ int main(int argc, char *argv[])
     auto **names = get_labels(name_list);
     auto classes = option_find_int(options, (char *)"classes", 20);
     auto frame_skip = 0;
-    auto prefix = nullptr;
     auto avg = 3;
     auto hier_thresh = 0.5;
-    auto fullscreen = 0;
 
     image **alphabet = load_alphabet();
 
@@ -269,39 +341,28 @@ int main(int argc, char *argv[])
 
     cv::Mat f;
     cap >> f;
-    auto d = Detector(cfg,
-                      weights,
-                      thresh,
-                      names,
-                      classes,
-                      frame_skip,
-                      prefix,
-                      avg,
-                      hier_thresh,
-                      fullscreen,
-                      f);
+    auto d = Detector(cfg, weights, thresh, names, frame_skip, avg, hier_thresh, f);
 
+    make_window((char *)"Demo", 1352, 1013, 0);
+    auto start = what_time_is_it_now();
     for (;;)
     {
         cap >> f;
         auto [dets, nboxes] = d.run_once(f);
 
-        printf("\033[2J");
-        printf("\033[1;1H");
-        printf("\nFPS:%.1f\n", d.fps());
+        auto end = what_time_is_it_now();
+        auto fps = 1. / (end - start);
+        start = end;
+        printf("\nFPS:%.1f\n", fps);
         printf("Objects:\n\n");
-        image display = d.buff;
-        draw_detections(display,
-                        dets,
-                        nboxes,
-                        d.detection_threshold(),
-                        d.labels(),
-                        alphabet,
-                        d.classes());
+        draw_detections(
+            f, dets, nboxes, d.detection_threshold(), d.labels(), alphabet, classes);
         free_detections(dets, nboxes);
-        int c = show_image(d.buff, "Demo", 1);
-        if (c != -1)
-            c = c % 256;
+        cv::imshow("asd", f);
+        cv::waitKey(1);
+        //int c = show_image(d.buff, "Demo", 1);
+        //if (c != -1)
+            //c = c % 256;
         /*
         if (c == 82)
         {
