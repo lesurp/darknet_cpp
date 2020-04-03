@@ -102,12 +102,11 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    cv::Mat f;
-    cap >> f;
     auto d = darknet::Detector::from_data_cfg(
-        cfg, weights, datacfg, thresh, frame_skip, avg, hier_thresh, f);
+        cfg, weights, datacfg, thresh, frame_skip, avg, hier_thresh);
 
     auto start = std::chrono::steady_clock::now();
+    cv::Mat f;
     for (;;)
     {
         cap >> f;

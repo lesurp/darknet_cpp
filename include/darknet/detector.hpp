@@ -16,6 +16,24 @@
 
 namespace darknet
 {
+namespace details
+{
+struct Image
+{
+    int w;
+    int h;
+    int c;
+    std::unique_ptr<float[]> data;
+
+    Image() : w(0), h(0), c(0), data(nullptr) {}
+
+    Image(int w, int h, int c)
+        : w(w), h(h), c(c), data(std::make_unique<float[]>(w * h * c))
+    {
+    }
+};
+} // namespace details
+
 class Detections
 {
   public:
@@ -63,8 +81,7 @@ class Detector
              float thresh,
              int delay,
              int avg_frames,
-             float hier,
-             cv::Mat const &init_f);
+             float hier);
 
     static Detector from_data_cfg(char *cfgfile,
                                   char *weightfile,
@@ -72,8 +89,7 @@ class Detector
                                   float thresh,
                                   int delay,
                                   int avg_frames,
-                                  float hier,
-                                  cv::Mat const &init_f);
+                                  float hier);
 
     float detection_threshold() const { return detection_threshold_; }
     float &detection_threshold() { return detection_threshold_; }
@@ -87,14 +103,6 @@ class Detector
     Detections run(cv::Mat const &image);
 
   private:
-    // This is need because 'image' is declared as an anonymous struct.
-    // This means we *cannot* forward decalre it, and thence use a proxy struct
-    // NOTE: this *might* actually be a better design,
-    // as we don't leak any forward declaration this way
-    // whereas we leak the 'network' types etc. early in this file
-    struct Image;
-    static void free_image_wrap(Image *i);
-
     template <auto fn> using Deleter = std::integral_constant<decltype(fn), fn>;
     std::unique_ptr<network, Deleter<free_network>> net;
 
@@ -107,9 +115,8 @@ class Detector
 
     std::vector<std::string> labels_;
 
-    // NOTE: this needs to be deleted manually (well, its content)
-    std::unique_ptr<Image, Deleter<free_image_wrap>> buff_;
-    std::unique_ptr<Image, Deleter<free_image_wrap>> buff_letter_;
+    details::Image buff_;
+    details::Image buff_letter_;
 
     int avg_index = 0;
     std::vector<std::unique_ptr<float[]>> predictions_;
