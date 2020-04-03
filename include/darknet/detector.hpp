@@ -1,82 +1,21 @@
-#include <opencv2/core/types.hpp>
+#ifndef DETECTOR_HPP_YDSL4IM7
+#define DETECTOR_HPP_YDSL4IM7
+
+#include "assert.h"
+#include <opencv2/core.hpp>
+#include <opencv2/imgproc.hpp>
+
+// TODO split this in a cpp file so we can avoid including darknet. here
+// this would allow us to contain those macro definitions
 #define OPENCV
 #define GPU
 #define CUDNN
-
-#include "assert.h"
 #include "darknet.h"
-#include <fmt/printf.h>
-#include <opencv2/core.hpp>
-#include <opencv2/highgui.hpp>
-#include <opencv2/imgproc.hpp>
-#include <opencv2/videoio.hpp>
 
-void draw_detections(
-    cv::Mat &f, detection *dets, int num, float thresh, char **names, int classes)
+// TODO: get rid of asserts when with have contracts (or whatever is replacing them)
+
+namespace darknet
 {
-    for (int i = 0; i < num; ++i)
-    {
-        int class_ = -1;
-        for (int j = 0; j < classes; ++j)
-        {
-            if (dets[i].prob[j] > thresh)
-            {
-                // note that we could have other values above the threshold, but the
-                // classes are ordered in decreasing order
-                class_ = j;
-                break;
-            }
-        }
-        if (class_ < 0)
-        {
-            continue;
-        }
-
-        float red = 255.0;
-        float green = 255.0;
-        float blue = 0.0;
-        box b = dets[i].bbox;
-
-        int left = (b.x - b.w / 2.) * f.cols;
-        int right = (b.x + b.w / 2.) * f.cols;
-        int top = (b.y - b.h / 2.) * f.rows;
-        int bot = (b.y + b.h / 2.) * f.rows;
-
-        if (left < 0)
-            left = 0;
-        if (right > f.cols - 1)
-            right = f.cols - 1;
-        if (top < 0)
-            top = 0;
-        if (bot > f.rows - 1)
-            bot = f.rows - 1;
-
-        cv::rectangle(f,
-                      cv::Point(left, top),
-                      cv::Point(right, bot),
-                      cv::Scalar(red, green, blue),
-                      1);
-        cv::putText(f,
-                    names[class_],
-                    cv::Point(left, bot),
-                    0,
-                    1.0,
-                    cv::Scalar_(red, green, blue));
-        // TODO: what is this..?
-        /*
-        if (dets[i].mask)
-        {
-            image mask = float_to_image(14, 14, 1, dets[i].mask);
-            image resized_mask = resize_image(mask, b.w * f.cols, b.h * f.rows);
-            image tmask = threshold_image(resized_mask, .5);
-            embed_image(tmask, im, left, top);
-            free_image(mask);
-            free_image(resized_mask);
-            free_image(tmask);
-        }
-        */
-    }
-}
 
 static float get_pixel(image m, int x, int y, int c)
 {
@@ -141,6 +80,23 @@ int size_network(network *net)
     return count;
 }
 
+class Detections
+{
+  public:
+    using iterator = detection *;
+    Detections(detection *d, int n) : d_(d), n_(n) {}
+    ~Detections() { free_detections(d_, n_); }
+    Detections(Detections const &) = delete;
+    Detections &operator=(Detections const &) = delete;
+
+    iterator begin() const { return d_; }
+    iterator end() const { return d_ + n_; }
+
+  private:
+    detection *d_;
+    int n_;
+};
+
 class Detector
 {
   public:
@@ -184,7 +140,7 @@ class Detector
     char **labels() const { return labels_; }
     int classes() const { return classes_; }
 
-    std::pair<detection *, int> run(cv::Mat const &image)
+    Detections run(cv::Mat const &image)
     {
         free_image(buff);
         buff = mat_to_image(image);
@@ -206,7 +162,7 @@ class Detector
             do_nms_obj(dets, nboxes, l.classes, nms);
 
         avg_index = (avg_index + 1) % avg_frames_;
-        return {dets, nboxes};
+        return Detections{dets, nboxes};
     }
 
   private:
@@ -298,74 +254,72 @@ detection *Detector::avg_predictions(network *net, int *nboxes)
     return dets;
 }
 
-int main(int argc, char *argv[])
+void draw_detections(
+    cv::Mat &f, Detections const &detections, float thresh, char **names, int classes)
 {
-    if (argc < 5)
+    for (auto det : detections)
     {
-        fmt::print("Not enough arguments, 5 required");
-        return 1;
-    }
-
-    auto datacfg = argv[1];
-    auto cfg = argv[2];
-    auto weights = argv[3];
-    auto cam = argv[4];
-    auto thresh = 0.5;
-    // auto classes = option_find_int(options, (char *)"classes", 20);
-    auto frame_skip = 0;
-    auto avg = 3;
-    auto hier_thresh = 0.5;
-
-    cv::VideoCapture cap(cam);
-    if (!cap.isOpened())
-    {
-        fmt::print("Could not open camera device: {}", cam);
-        return 1;
-    }
-
-    cv::Mat f;
-    cap >> f;
-    auto d = Detector(datacfg, cfg, weights, thresh, frame_skip, avg, hier_thresh, f);
-
-    make_window((char *)"Demo", 1352, 1013, 0);
-    auto start = what_time_is_it_now();
-    for (;;)
-    {
-        cap >> f;
-        auto [dets, nboxes] = d.run(f);
-
-        auto end = what_time_is_it_now();
-        auto fps = 1. / (end - start);
-        start = end;
-        fmt::printf("\nFPS:%.1f\n", fps);
-        fmt::printf("Objects:\n\n");
-        draw_detections(
-            f, dets, nboxes, d.detection_threshold(), d.labels(), d.classes());
-        // TODO: make some wrapper around this (with raii)
-        free_detections(dets, nboxes);
-        cv::imshow("asd", f);
-        char c = cv::waitKey(1);
-        switch (c)
+        int class_ = -1;
+        for (int j = 0; j < classes; ++j)
         {
-        case 'q':
-            return 0;
-        case 'j':
-            d.detection_threshold() -= 0.02;
-            d.detection_threshold() = std::max(0.02f, d.detection_threshold());
-            break;
-        case 'k':
-            d.detection_threshold() += 0.02;
-            break;
-            // TODO: what is this for?
-        case 'h':
-            d.hier_threshold() -= 0.02;
-            d.detection_threshold() = std::max(0.0f, d.detection_threshold());
-            break;
-        case 'l':
-            d.hier_threshold() += 0.02;
-            break;
+            if (det.prob[j] > thresh)
+            {
+                // note that we could have other values above the threshold, but the
+                // classes are ordered in decreasing order
+                class_ = j;
+                break;
+            }
         }
-    }
+        if (class_ < 0)
+        {
+            continue;
+        }
 
-    return 0;
+        float red = 255.0;
+        float green = 255.0;
+        float blue = 0.0;
+        box b = det.bbox;
+
+        int left = (b.x - b.w / 2.) * f.cols;
+        int right = (b.x + b.w / 2.) * f.cols;
+        int top = (b.y - b.h / 2.) * f.rows;
+        int bot = (b.y + b.h / 2.) * f.rows;
+
+        if (left < 0)
+            left = 0;
+        if (right > f.cols - 1)
+            right = f.cols - 1;
+        if (top < 0)
+            top = 0;
+        if (bot > f.rows - 1)
+            bot = f.rows - 1;
+
+        cv::rectangle(f,
+                      cv::Point(left, top),
+                      cv::Point(right, bot),
+                      cv::Scalar(red, green, blue),
+                      1);
+        cv::putText(f,
+                    names[class_],
+                    cv::Point(left, bot),
+                    0,
+                    1.0,
+                    cv::Scalar_(red, green, blue));
+        // TODO: what is this..?
+        /*
+        if (det.mask)
+        {
+            image mask = float_to_image(14, 14, 1, dets[i].mask);
+            image resized_mask = resize_image(mask, b.w * f.cols, b.h * f.rows);
+            image tmask = threshold_image(resized_mask, .5);
+            embed_image(tmask, im, left, top);
+            free_image(mask);
+            free_image(resized_mask);
+            free_image(tmask);
+        }
+        */
+    }
 }
+} // namespace darknet
+
+#endif /* end of include guard: DETECTOR_HPP_YDSL4IM7 */
