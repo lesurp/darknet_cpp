@@ -49,6 +49,7 @@ target_include_directories(darknet PUBLIC
     $<INSTALL_INTERFACE:include>
     )
 set_target_properties(darknet PROPERTIES PUBLIC_HEADER ${public_hdr})
+set_property(TARGET darknet PROPERTY POSITION_INDEPENDENT_CODE ON)
 target_compile_options(darknet PRIVATE -Wall -Wextra -pedantic)
 
 set(main_lib_dest lib/darknet)
@@ -58,6 +59,7 @@ install(TARGETS darknet darknet_c cuda
     PUBLIC_HEADER DESTINATION include/darknet
     )
 install(EXPORT darknet DESTINATION ${main_lib_dest})
+install(FILES darknet-config.cmake DESTINATION ${main_lib_dest})
 
 
 add_executable(live examples/live.cpp)
