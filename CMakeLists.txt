@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.17)
-project(darknet_cpp)
+project(darknet)
 set(CMAKE_CXX_STANDARD 17)
 
 set(DARKNET_DIR CACHE STRING "darknet installation location")
@@ -8,9 +8,6 @@ if(DARKNET_DIR STREQUAL "")
     message(FATAL_ERROR "DARKNET_DIR not defined")
 endif()
 
-find_package(range-v3 CONFIG REQUIRED)
-find_package(spdlog CONFIG REQUIRED)
-find_package(GTest CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
 find_package(OpenCV
     REQUIRED
@@ -43,27 +40,33 @@ set(private_src
 set(dependencies
     darknet_c
     opencv_core
-    opencv_imgproc
-    range-v3)
-
-add_library(darknet_cpp ${private_src} ${public_hdr})
-target_link_libraries(darknet_cpp PUBLIC ${dependencies})
-target_include_directories(darknet_cpp PUBLIC include)
-target_compile_options(darknet_cpp PRIVATE -Wall -Wextra -pedantic)
-
-install(TARGETS darknet_cpp darknet_c
-    EXPORT darknet_cpp
     )
+
+add_library(darknet ${private_src})
+target_link_libraries(darknet PUBLIC ${dependencies})
+target_include_directories(darknet PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+    )
+set_target_properties(darknet PROPERTIES PUBLIC_HEADER ${public_hdr})
+target_compile_options(darknet PRIVATE -Wall -Wextra -pedantic)
+
+set(main_lib_dest lib/darknet)
+install(TARGETS darknet darknet_c cuda
+    EXPORT darknet
+    ARCHIVE DESTINATION ${main_lib_dest}
+    PUBLIC_HEADER DESTINATION include/darknet
+    )
+install(EXPORT darknet DESTINATION ${main_lib_dest})
 
 
 add_executable(live examples/live.cpp)
 target_link_libraries(live
     PRIVATE
-    darknet_cpp
+    darknet
     opencv_videoio
     opencv_highgui
     opencv_imgproc
     fmt::fmt
-    range-v3
     )
 target_compile_options(live PRIVATE -Wall -Wextra -pedantic)
