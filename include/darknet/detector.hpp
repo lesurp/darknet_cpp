@@ -9,7 +9,7 @@
 #define OPENCV
 #define GPU
 #define CUDNN
-#include "darknet.h"
+#include <darknet.h>
 #include <memory>
 #include <opencv2/core.hpp>
 #include <vector>
@@ -20,10 +20,31 @@ class Detections
 {
   public:
     using iterator = detection *;
+    Detections() : d_(nullptr), n_(0) {}
     Detections(detection *d, int n) : d_(d), n_(n) {}
-    ~Detections() { free_detections(d_, n_); }
+    ~Detections()
+    {
+        if (d_)
+        {
+            free_detections(d_, n_);
+        }
+    }
     Detections(Detections const &) = delete;
     Detections &operator=(Detections const &) = delete;
+    Detections(Detections &&d)
+    {
+        d_ = d.d_;
+        n_ = d.n_;
+        d.d_ = nullptr;
+    }
+
+    Detections &operator=(Detections &&d)
+    {
+        d_ = d.d_;
+        n_ = d.n_;
+        d.d_ = nullptr;
+        return *this;
+    }
 
     iterator begin() const { return d_; }
     iterator end() const { return d_ + n_; }
