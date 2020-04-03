@@ -173,7 +173,7 @@ Detections Detector::run(cv::Mat const &image)
     network_predict(net.get(), X);
 
     remember_network(net.get());
-    detection *dets = 0;
+    detection *dets = nullptr;
     int nboxes = 0;
     dets = avg_predictions(net.get(), &nboxes);
 
